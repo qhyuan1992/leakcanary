@@ -2,9 +2,10 @@ package com.squareup.leakcanary;
 
 import android.app.Application;
 import android.content.Context;
+import android.os.Looper;
+import com.squareup.leakcanary.internal.LeakCanaryInternals;
 import java.util.concurrent.TimeUnit;
 
-import static com.squareup.leakcanary.RefWatcher.DISABLED;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 /** A {@link RefWatcherBuilder} with appropriate Android defaults. */
@@ -13,9 +14,31 @@ public final class AndroidRefWatcherBuilder extends RefWatcherBuilder<AndroidRef
   private static final long DEFAULT_WATCH_DELAY_MILLIS = SECONDS.toMillis(5);
 
   private final Context context;
+  private LeakDirectoryProvider leakDirectoryProvider;
+  private boolean watchActivities;
 
   AndroidRefWatcherBuilder(Context context) {
     this.context = context.getApplicationContext();
+    this.leakDirectoryProvider = new DefaultLeakDirectoryProvider(context);
+    watchActivities = true;
+  }
+
+  /**
+   * Sets a custom {@link LeakDirectoryProvider}. This overrides any call to {@link
+   * #maxStoredHeapDumps(int)}.
+   */
+  public AndroidRefWatcherBuilder leakDirectoryProvider(
+      LeakDirectoryProvider leakDirectoryProvider) {
+    this.leakDirectoryProvider = leakDirectoryProvider;
+    return this;
+  }
+
+  /**
+   * Whether we should automatically watch activities (on ICS+). Default is true.
+   */
+  public AndroidRefWatcherBuilder watchActivities(boolean watchActivities) {
+    this.watchActivities = watchActivities;
+    return this;
   }
 
   /**
@@ -38,27 +61,35 @@ public final class AndroidRefWatcherBuilder extends RefWatcherBuilder<AndroidRef
 
   /**
    * Sets the maximum number of heap dumps stored. This overrides any call to {@link
-   * #heapDumper(HeapDumper)} as well as any call to
-   * {@link LeakCanary#setDisplayLeakActivityDirectoryProvider(LeakDirectoryProvider)})}
+   * #leakDirectoryProvider(LeakDirectoryProvider)}.
    *
    * @throws IllegalArgumentException if maxStoredHeapDumps < 1.
    */
   public AndroidRefWatcherBuilder maxStoredHeapDumps(int maxStoredHeapDumps) {
-    LeakDirectoryProvider leakDirectoryProvider =
-        new DefaultLeakDirectoryProvider(context, maxStoredHeapDumps);
-    LeakCanary.setDisplayLeakActivityDirectoryProvider(leakDirectoryProvider);
-    return heapDumper(new AndroidHeapDumper(context, leakDirectoryProvider));
+    leakDirectoryProvider = new DefaultLeakDirectoryProvider(context, maxStoredHeapDumps);
+    return this;
   }
 
   /**
-   * Creates a {@link RefWatcher} instance and starts watching activity references (on ICS+).
+   * Creates a {@link RefWatcher} instance.
+   *
+   * @throws UnsupportedOperationException if not called from the main thread.
+   * @throws UnsupportedOperationException if called more than once per Android process.
    */
   public RefWatcher buildAndInstall() {
+    if (Looper.getMainLooper().getThread() != Thread.currentThread()) {
+      throw new UnsupportedOperationException(
+          "Should be called from the main thread, not " + Thread.currentThread().getName());
+    }
+    if (LeakCanaryInternals.refWatcher != null) {
+      throw new UnsupportedOperationException("buildAndInstall() should only be called once.");
+    }
     RefWatcher refWatcher = build();
-    if (refWatcher != DISABLED) {
-      LeakCanary.enableDisplayLeakActivity(context);
+    if (watchActivities) {
       ActivityRefWatcher.install((Application) context, refWatcher);
     }
+    LeakCanaryInternals.refWatcher = refWatcher;
+    LeakCanaryInternals.leakDirectoryProvider = leakDirectoryProvider;
     return refWatcher;
   }
 
@@ -67,7 +98,6 @@ public final class AndroidRefWatcherBuilder extends RefWatcherBuilder<AndroidRef
   }
 
   @Override protected HeapDumper defaultHeapDumper() {
-    LeakDirectoryProvider leakDirectoryProvider = new DefaultLeakDirectoryProvider(context);
     return new AndroidHeapDumper(context, leakDirectoryProvider);
   }
 

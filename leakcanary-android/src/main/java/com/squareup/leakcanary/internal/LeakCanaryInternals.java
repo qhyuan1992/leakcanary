@@ -28,7 +28,9 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import com.squareup.leakcanary.CanaryLog;
+import com.squareup.leakcanary.LeakDirectoryProvider;
 import com.squareup.leakcanary.R;
+import com.squareup.leakcanary.RefWatcher;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -56,6 +58,9 @@ public final class LeakCanaryInternals {
 
   private static final String NOTIFICATION_CHANNEL_ID = "leakcanary";
 
+  public static volatile RefWatcher refWatcher;
+  public static volatile LeakDirectoryProvider leakDirectoryProvider;
+
   public static void executeOnFileIoThread(Runnable runnable) {
     fileIoExecutor.execute(runnable);
   }
@@ -70,16 +75,6 @@ public final class LeakCanaryInternals {
     }
   }
 
-  public static void setEnabled(Context context, final Class<?> componentClass,
-      final boolean enabled) {
-    final Context appContext = context.getApplicationContext();
-    executeOnFileIoThread(new Runnable() {
-      @Override public void run() {
-        setEnabledBlocking(appContext, componentClass, enabled);
-      }
-    });
-  }
-
   public static void setEnabledBlocking(Context appContext, Class<?> componentClass,
       boolean enabled) {
     ComponentName component = new ComponentName(appContext, componentClass);
@@ -89,14 +84,14 @@ public final class LeakCanaryInternals {
     packageManager.setComponentEnabledSetting(component, newState, DONT_KILL_APP);
   }
 
-  public static boolean isInServiceProcess(Context context, Class<? extends Service> serviceClass) {
+  public static Boolean isInServiceProcess(Context context, Class<? extends Service> serviceClass) {
     PackageManager packageManager = context.getPackageManager();
     PackageInfo packageInfo;
     try {
       packageInfo = packageManager.getPackageInfo(context.getPackageName(), GET_SERVICES);
     } catch (Exception e) {
       CanaryLog.d(e, "Could not get package info for %s", context.getPackageName());
-      return false;
+      return null;
     }
     String mainProcess = packageInfo.applicationInfo.processName;
 
@@ -106,11 +101,12 @@ public final class LeakCanaryInternals {
       serviceInfo = packageManager.getServiceInfo(component, 0);
     } catch (PackageManager.NameNotFoundException ignored) {
       // Service is disabled.
-      return false;
+      return null;
     }
 
     if (serviceInfo.processName.equals(mainProcess)) {
-      CanaryLog.d("Did not expect service %s to run in main process %s", serviceClass, mainProcess);
+      CanaryLog.d("Did not expect service %s to run in main process %s", serviceClass.getName(),
+          mainProcess);
       // Technically we are in the service process, but we're not in the service dedicated process.
       return false;
     }
@@ -137,7 +133,7 @@ public final class LeakCanaryInternals {
     }
     if (myProcess == null) {
       CanaryLog.d("Could not find running process for %d", myPid);
-      return false;
+      return null;
     }
 
     return myProcess.processName.equals(serviceInfo.processName);

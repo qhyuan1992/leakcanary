@@ -21,9 +21,6 @@ import java.util.List;
 
 /**
  * Provides access to where heap dumps and analysis results will be stored.
- * When using your own implementation, you should also call {@link
- * LeakCanary#setDisplayLeakActivityDirectoryProvider(LeakDirectoryProvider)} to ensure the
- * provided activity is able to display the leaks.
  */
 public interface LeakDirectoryProvider {
 
