@@ -102,7 +102,7 @@ public final class HeapAnalyzer {
    * Searches the heap dump for a {@link KeyedWeakReference} instance with the corresponding key,
    * and then computes the shortest strong reference path from that instance to the GC roots.
    */
-  public AnalysisResult checkForLeak(File heapDumpFile, String referenceKey) {
+  public AnalysisResult checkForLeak(File heapDumpFile, String referenceKey) { // referenceKey是生成的uuid
     long analysisStartNanoTime = System.nanoTime();
 
     if (!heapDumpFile.exists()) {
@@ -113,6 +113,7 @@ public final class HeapAnalyzer {
     try {
       HprofBuffer buffer = new MemoryMappedFileBuffer(heapDumpFile);
       HprofParser parser = new HprofParser(buffer);
+      // Snapshot类似Jsoup的Document，方便的解析hprof
       Snapshot snapshot = parser.parse();
       deduplicateGcRoots(snapshot);
 
@@ -136,8 +137,14 @@ public final class HeapAnalyzer {
     // THashMap has a smaller memory footprint than HashMap.
     final THashMap<String, RootObj> uniqueRootMap = new THashMap<>();
 
+    // 获取GCRoots，GCRoots存在于SnapShot里面的default heap
     final Collection<RootObj> gcRoots = snapshot.getGCRoots();
+    // 遍历GCRoot，针对每个GCRoot生成特有的key值，类似于native static@0x82763689
+    // 将GCRoot添加到map中，达到去重的目的
+    // RootObj的name和id一样就是同一个对象
     for (RootObj root : gcRoots) {
+      // 遍历每个GCRoot，生成一个key
+      // 类似： native static@0x82763689
       String key = generateRootKey(root);
       if (!uniqueRootMap.containsKey(key)) {
         uniqueRootMap.put(key, root);
@@ -145,7 +152,7 @@ public final class HeapAnalyzer {
     }
 
     // Repopulate snapshot with unique GC roots.
-    gcRoots.clear();
+    gcRoots.clear(); // 清空从snapShot中拿到的gcRoots，并重新赋值，此后这个gcRoot中的root对象是唯一的
     uniqueRootMap.forEach(new TObjectProcedure<String>() {
       @Override public boolean execute(String key) {
         return gcRoots.add(uniqueRootMap.get(key));
@@ -154,10 +161,16 @@ public final class HeapAnalyzer {
   }
 
   private String generateRootKey(RootObj root) {
+    /**
+     * {@link com.squareup.haha.perflib.RootType}
+      */
+    //
     return String.format("%s@0x%08x", root.getRootType().getName(), root.getId());
   }
 
   private Instance findLeakingReference(String key, Snapshot snapshot) {
+    // 找到KeyedWeakReference类型的对象
+    // 类似的 也可以找到android.graphic.Bitmap等其他对象
     ClassObj refClass = snapshot.findClass(KeyedWeakReference.class.getName());
     List<String> keysFound = new ArrayList<>();
     for (Instance instance : refClass.getInstancesList()) {

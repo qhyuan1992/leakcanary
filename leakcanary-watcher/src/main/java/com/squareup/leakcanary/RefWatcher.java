@@ -108,6 +108,7 @@ public final class RefWatcher {
       // The debugger can create false leaks.
       return RETRY;
     }
+    // 移除虚引用对象后，判断要监控的这个引用是否已经不在了，即当前要监控的这个引用其实处于虚引用队列中
     if (gone(reference)) {
       return DONE;
     }
@@ -117,12 +118,15 @@ public final class RefWatcher {
       long startDumpHeap = System.nanoTime();
       long gcDurationMs = NANOSECONDS.toMillis(startDumpHeap - gcStartNanoTime);
 
+      // 这个对象还存在,dump hprof文件
       File heapDumpFile = heapDumper.dumpHeap();
       if (heapDumpFile == RETRY_LATER) {
         // Could not dump the heap.
         return RETRY;
       }
       long heapDumpDurationMs = NANOSECONDS.toMillis(System.nanoTime() - startDumpHeap);
+      // 让外层来实现具体的分析：在hprof文件中分析这个无法释放的对象
+      // excludedRefs表示排除这类引用，这个可以在AndroidExcludedRefs中配置
       heapdumpListener.analyze(
           new HeapDump(heapDumpFile, reference.key, reference.name, excludedRefs, watchDurationMs,
               gcDurationMs, heapDumpDurationMs));
@@ -138,6 +142,8 @@ public final class RefWatcher {
     // WeakReferences are enqueued as soon as the object to which they point to becomes weakly
     // reachable. This is before finalization or garbage collection has actually happened.
     KeyedWeakReference ref;
+    // 虚引用对象在这个对象处于虚不可达的时候，这个虚引用会被加入到虚引用队列中
+    // 即，处于虚引用队列中的对象都会被随时回收掉，这部分引用不用考虑
     while ((ref = (KeyedWeakReference) queue.poll()) != null) {
       retainedKeys.remove(ref.key);
     }
